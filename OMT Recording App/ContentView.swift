@@ -815,7 +815,7 @@ struct SegmentView_Previews: PreviewProvider {
 struct HoldAndRecordView: View {
     @State private var isRecording = false
     @State private var recordings: [URL] = []
-    @State private var statusText: String = "Status: Ready to record"
+    @State private var statusText: String = "Status: Ready to Record"
     @State private var audioRecorder: AVAudioRecorder?
     @State private var audioPlayer: AVAudioPlayer?
     @State private var finalAudioURL: URL?
