@@ -12,12 +12,17 @@ struct ContentView: View {
                 NavigationLink("Truncate", destination: TruncateView())
                     .foregroundColor(.white)
                     .padding()
-                
+
                 NavigationLink("Segment", destination: SegmentView())
                     .foregroundColor(.white)
                     .padding()
-                
+
                 NavigationLink("Files", destination: FilesView())
+                    .foregroundColor(.white)
+                    .padding()
+
+                // New view: Trade Language Bible
+                NavigationLink("Trade Language Bible", destination: TradeLanguageBibleView())
                     .foregroundColor(.white)
                     .padding()
             }
@@ -25,6 +30,243 @@ struct ContentView: View {
             .background(Color(UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1))) // Dark background
             .navigationTitle("OMT Recording")
         }
+    }
+}
+
+struct BibleAudioSegment {
+    let verse: Int
+    let timestamp: TimeInterval
+}
+
+struct TradeLanguageBibleView: View {
+    @State private var selectedChapter = 1
+    @State private var selectedVerseFrom = 1
+    @State private var selectedVerseTo = 4
+    @State private var currentVerseIndex = 0
+    @State private var verses = [
+        "I always thank my God for you because of his grace given you in Christ Jesus.",
+        "For in him you have been enriched in every way—with all kinds of speech and with all knowledge—",
+        "God thus confirming our testimony about Christ among you.",
+        "Therefore you do not lack any spiritual gift as you eagerly wait for our Lord Jesus Christ to be revealed.",
+        "He will also keep you firm to the end, so that you will be blameless on the day of our Lord Jesus Christ.",
+        "God is faithful, who has called you into fellowship with his Son, Jesus Christ our Lord."
+    ]
+    
+    @State private var isRecording = false
+    @State private var verseTimestamps: [(Int, TimeInterval)] = []
+    @State private var audioRecorder: AVAudioRecorder?
+    @State private var recordingSession: AVAudioSession = AVAudioSession.sharedInstance()
+    @State private var audioSegments: [BibleAudioSegment] = []
+    @State private var audioPlayer: AVAudioPlayer?
+
+    var body: some View {
+        VStack {
+            HStack {
+                Text("BOOK")
+                Text("1 CORINTHIANS")
+                    .font(.headline)
+            }
+            .padding(.top)
+
+            HStack {
+                Text("CHAPTER")
+                Picker("Select Chapter", selection: $selectedChapter) {
+                    ForEach(1...16, id: \.self) { chapter in
+                        Text("\(chapter)")
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+            }
+            .padding(.top)
+
+            HStack {
+                Text("VERSES")
+                Picker("From", selection: $selectedVerseFrom) {
+                    ForEach(1...verses.count, id: \.self) { verse in
+                        Text("\(verse)")
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+                
+                Text("-")
+                
+                Picker("To", selection: $selectedVerseTo) {
+                    ForEach(1...verses.count, id: \.self) { verse in
+                        Text("\(verse)")
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+            }
+            .padding(.top)
+
+            Button(action: {
+                if isRecording {
+                    stopRecording()
+                } else {
+                    startRecording()
+                }
+            }) {
+                Text(isRecording ? "Recording in Progress" : "Start Recording")
+                    .foregroundColor(.red)
+                    .padding()
+            }
+            
+            if isRecording {
+                Text("VERSE \(currentVerseIndex + 1)")
+                    .font(.headline)
+                    .padding(.top)
+                
+                Text(verses[currentVerseIndex])
+                    .multilineTextAlignment(.center)
+                    .padding()
+                
+                HStack {
+                    Button(action: {
+                        if currentVerseIndex > 0 {
+                            currentVerseIndex -= 1
+                            timestampCurrentVerse()
+                        }
+                    }) {
+                        Image(systemName: "arrow.left")
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        if currentVerseIndex < verses.count - 1 {
+                            currentVerseIndex += 1
+                            timestampCurrentVerse()
+                        }
+                    }) {
+                        Image(systemName: "arrow.right")
+                    }
+                }
+                .padding(.horizontal)
+            }
+            
+            List(audioSegments, id: \.verse) { segment in
+                HStack {
+                    Text("Verse \(segment.verse)")
+                    Spacer()
+                    Button(action: {
+                        playSegment(for: segment)
+                    }) {
+                        Text("Play")
+                    }
+                }
+            }
+        }
+        .padding()
+        .onAppear {
+            setupRecordingSession()
+        }
+    }
+    
+    func setupRecordingSession() {
+        do {
+            try recordingSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+            try recordingSession.setActive(true)
+            print("Audio session is active.")
+            
+            recordingSession.requestRecordPermission { allowed in
+                if !allowed {
+                    print("Recording permission denied")
+                }
+            }
+        } catch {
+            print("Failed to set up recording session: \(error)")
+        }
+    }
+    
+    func startRecording() {
+        let audioFilename = getDocumentsDirectory().appendingPathComponent("recording.m4a")
+        let settings = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 12000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+        
+        do {
+            audioRecorder = try AVAudioRecorder(url: audioFilename, settings: settings)
+            audioRecorder?.record()
+            isRecording = true
+            
+            verseTimestamps = []
+            audioSegments = [] // Clear previous segments
+            timestampCurrentVerse() // Timestamp first verse
+            
+            print("Recording started at: \(audioFilename.path)")
+        } catch {
+            print("Failed to start recording: \(error)")
+        }
+    }
+    
+    func stopRecording() {
+        audioRecorder?.stop()
+        isRecording = false
+        print("Recording stopped.")
+        
+        splitAudioByVerses()
+    }
+    
+    func timestampCurrentVerse() {
+        if let recorder = audioRecorder, recorder.isRecording {
+            let currentTime = recorder.currentTime
+            verseTimestamps.append((currentVerseIndex + 1, currentTime))
+            print("Timestamp for verse \(currentVerseIndex + 1): \(currentTime)")
+        }
+    }
+    
+    func splitAudioByVerses() {
+        audioSegments.removeAll() // Clear previous segments
+        for (verse, timestamp) in verseTimestamps {
+            print("Verse \(verse) starts at: \(timestamp) seconds")
+            let segment = BibleAudioSegment(verse: verse, timestamp: timestamp)
+            audioSegments.append(segment)
+        }
+    }
+    
+    func getDocumentsDirectory() -> URL {
+        let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        return paths[0]
+    }
+
+    func playSegment(for segment: BibleAudioSegment) {
+        let audioFilename = getDocumentsDirectory().appendingPathComponent("recording.m4a")
+        
+        do {
+            audioPlayer = try AVAudioPlayer(contentsOf: audioFilename)
+            audioPlayer?.prepareToPlay()
+            
+            print("Audio duration: \(audioPlayer?.duration ?? 0) seconds")
+            if segment.timestamp < audioPlayer?.duration ?? 0 {
+                let endTime = getNextVerseTimestamp(for: segment.verse) ?? audioPlayer?.duration ?? 0
+                audioPlayer?.currentTime = segment.timestamp
+                audioPlayer?.play()
+                
+                // Schedule to stop the player after the segment duration
+                DispatchQueue.main.asyncAfter(deadline: .now() + (endTime - segment.timestamp)) {
+                    self.audioPlayer?.stop()
+                    print("Stopped playing segment for verse: \(segment.verse)")
+                }
+                
+                print("Playing segment for verse: \(segment.verse) from timestamp: \(segment.timestamp) to \(endTime)")
+            } else {
+                print("Timestamp is greater than audio duration.")
+            }
+        } catch {
+            print("Error playing audio segment: \(error)")
+        }
+    }
+    
+    func getNextVerseTimestamp(for verse: Int) -> TimeInterval? {
+        if let index = verseTimestamps.firstIndex(where: { $0.0 == verse }) {
+            if index < verseTimestamps.count - 1 {
+                return verseTimestamps[index + 1].1
+            }
+        }
+        return nil // Return nil if there's no next timestamp
     }
 }
 
@@ -203,10 +445,6 @@ struct AudioFilesView: View {
         print("Sharing all chapters for \(book)")
     }
 }
-
-import SwiftUI
-
-import SwiftUI
 
 struct CommunityCheckView: View {
     var file: String
